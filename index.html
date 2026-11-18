@@ -1029,7 +1029,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <div class="addon-ck" id="h-uvc-ck">+</div>
         <img src="https://cdn.shopify.com/s/files/1/0912/3738/4503/files/Cleriva_Content_18.png?v=1784281589&width=96" alt="UV-C Sterilizer" style="width:44px;height:44px;object-fit:contain;border-radius:10px;background:var(--mist);flex-shrink:0"/>
         <div class="addon-b"><h5>Add Sterilizing Kit</h5><p>UV-C sterilizer + 6 extra silicone sleeve sets</p></div>
-        <div class="addon-p" id="h-uvc-p" data-usd="19.99">$19.99</div>
+        <div class="addon-p" id="h-uvc-p" data-kit-price>Checking price…</div>
         <div class="addon-qty" id="h-uvc-qty">
           <button class="aq-btn" onclick="adjQty('h-uvc',-1,event)">−</button>
           <span class="aq-count" id="h-uvc-n">1</span>
@@ -1564,7 +1564,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <div class="addon-ck" id="uvc-ck">+</div>
       <img src="https://cdn.shopify.com/s/files/1/0912/3738/4503/files/Cleriva_Content_18.png?v=1784281589&width=96" alt="UV-C Sterilizer" style="width:44px;height:44px;object-fit:contain;border-radius:10px;background:var(--mist);flex-shrink:0"/>
       <div class="addon-b"><h5>Add Sterilizing Kit</h5><p>UV-C sterilizer + 6 extra silicone sleeve sets</p></div>
-      <div class="addon-p" id="uvc-p" data-usd="19.99">$19.99</div>
+      <div class="addon-p" id="uvc-p" data-kit-price>Checking price…</div>
       <div class="addon-qty" id="uvc-qty">
         <button class="aq-btn" onclick="adjQty('uvc',-1,event)">−</button>
         <span class="aq-count" id="uvc-n">1</span>
@@ -1796,7 +1796,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <p style="font-size:12px;color:var(--muted);margin-top:3px">UV-C sterilizer + 6 extra silicone sleeve sets</p>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0">
-        <div class="cd-kit-price" id="cd-kit-added-price">$19.99</div>
+        <div class="cd-kit-price" id="cd-kit-added-price">Checking price…</div>
         <div style="display:flex;align-items:center;gap:5px">
           <button class="aq-btn" onclick="adjCartKitAdded(-1,event)">−</button>
           <span class="aq-count" id="cd-kit-added-n">1</span>
@@ -1814,7 +1814,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
           <h5>Add Sterilizing Kit</h5>
           <p>UV-C sterilizer + 6 extra silicone sleeve sets</p>
         </div>
-        <div class="cd-kit-price" data-usd="19.99">$19.99</div>
+        <div class="cd-kit-price" data-kit-price>Checking price…</div>
         <div class="addon-qty">
           <button class="aq-btn" onclick="adjCartKit(-1,event)">−</button>
           <span class="aq-count" id="cd-kit-n">1</span>
@@ -2002,7 +2002,8 @@ function updateBuyUI(n){
     if(!btn)return;
     const addonEl=document.getElementById(a[1]);
     const kitOn=addonEl&&addonEl.classList.contains('addon-on');
-    const kitL=window._KIT_PRICE||19.99;
+    const kitL=kitPrice();
+    if(kitOn&&kitL===null){btn.textContent='Kit price unavailable';return;}
     const kitAmt=kitOn?a[2]()*kitL:0;
     const nowT=fmtL(Math.round((nowL+kitAmt)*100)/100);
     const wasT=fmtL(Math.round((wasL+kitAmt)*100)/100);
@@ -2066,6 +2067,7 @@ function adjQty(id,delta,e){
   updateBuyUI(currentQty());
 }
 function toggleAddon(){
+  if(!document.getElementById('uvc-addon')?.classList.contains('addon-on')&&retryKitToggle(toggleAddon))return;
   const el=document.getElementById('uvc-addon'),ck=document.getElementById('uvc-ck');
   if(!el||!ck)return;
   const on=el.classList.toggle('addon-on');
@@ -2075,6 +2077,7 @@ function toggleAddon(){
   updateBuyUI(currentQty());
 }
 function toggleHAddon(){
+  if(!document.getElementById('h-uvc-addon')?.classList.contains('addon-on')&&retryKitToggle(toggleHAddon))return;
   const el=document.getElementById('h-uvc-addon'),ck=document.getElementById('h-uvc-ck');
   if(!el||!ck)return;
   const on=el.classList.toggle('addon-on');
@@ -2104,9 +2107,66 @@ function expertToggle(){
 /* ── Cart drawer / checkout ── */
 const VAR_WHITE='52709201641783';
 const VAR_BLACK='52709201609015';
-const VAR_KIT='52686809956663';
+/* The CRO edge Worker owns assignment. Shopify owns each variant's market price. */
+const KIT_VARIANTS={a:'52686809956663',b:'53595750990135'};
+let kitMarket=null, kitQuote=null, kitRequest=null;
+function assignedKit(){
+  const group=window.CRO?.assignments?.thy8o3xu;
+  // An enrolled browser with a missing edge runtime must not silently receive the original.
+  if(!window.CRO && /(?:^|;\s*)_cro=[^;]*thy8o3xu-/.test(document.cookie))return null;
+  return KIT_VARIANTS[group||'a']||null;
+}
+function kitPrice(){
+  return kitQuote && kitQuote.id===assignedKit()?kitQuote.amount:null;
+}
+function renderKit(){
+  const amount=kitPrice();
+  const label=amount===null?'Check price':window.fmtLocal(amount);
+  document.querySelectorAll('[data-kit-price]').forEach(el=>{el.textContent=label;});
+  updateBuyUI(currentQty());
+  updateCartTotals();
+}
+async function readKitQuote(){
+  const id=assignedKit();
+  if(!kitMarket||!id)throw new Error('Kit pricing is still loading');
+  const gid='gid://shopify/ProductVariant/'+id;
+  const query=`query Kit($id: ID!, $country: CountryCode!) @inContext(country: $country) {
+    localization { country { isoCode currency { isoCode } } }
+    node(id:$id) { ... on ProductVariant { id availableForSale price { amount currencyCode } } }
+  }`;
+  const response=await fetch('https://cleriva.com/api/2026-10/graphql.json',{
+    method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},
+    signal:AbortSignal.timeout(6500),body:JSON.stringify({query,variables:{id:gid,country:kitMarket.country}})
+  });
+  if(!response.ok)throw new Error('Kit price unavailable');
+  const {data,errors}=await response.json();
+  const item=data?.node,market=data?.localization?.country,amount=Number(item?.price?.amount);
+  if(errors||!item?.availableForSale||item.id!==gid||id!==assignedKit()||
+      item.price.currencyCode!==kitMarket.currency||market?.currency?.isoCode!==kitMarket.currency||
+      !Number.isFinite(amount)||amount<=0)throw new Error('Kit price unavailable');
+  return {id,amount,country:market.isoCode,currency:item.price.currencyCode};
+}
+function refreshKit(){
+  if(!kitRequest){
+    kitRequest=readKitQuote().then(quote=>{kitQuote=quote;return true;},()=>{kitQuote=null;return false;})
+      .finally(()=>{kitRequest=null;renderKit();});
+  }
+  return kitRequest;
+}
+function startKitMarket(country,currency){
+  kitMarket={country,currency};
+  refreshKit();
+}
+const pendingKitToggles=new Set();
+function retryKitToggle(toggle){
+  if(kitPrice()!==null)return false;
+  if(!pendingKitToggles.has(toggle)){
+    pendingKitToggles.add(toggle);
+    refreshKit().then(ready=>{pendingKitToggles.delete(toggle);if(ready)toggle();});
+  }
+  return true;
+}
 const VAR_PRIORITY='50661579325751';
-const KIT_PRICE=19.99;
 const PRIORITY_PRICE=2.99;
 let cdPriorityOn=false;
 let cdQty=2,cdAddonQty=1,cdAddonOn=false;
@@ -2305,6 +2365,7 @@ function setColor(idx,color){
   saveCartState();
 }
 function toggleCartKit(){
+  if(!cdAddonOn&&retryKitToggle(toggleCartKit))return;
   cdAddonOn=!cdAddonOn;
   const krow=document.getElementById('cd-kit-row');
   const kck=document.getElementById('cd-kit-ck');
@@ -2329,16 +2390,16 @@ function adjCartKit(delta,e){
 }
 function updateCartTotals(){
   const dp=window._DEVICE_PRICES||DEVICE_PRICES;
-  const kp=window._KIT_PRICE||KIT_PRICE;
+  const kp=kitPrice();
   const pp=window._PRIORITY_PRICE||PRIORITY_PRICE;
   const deviceTotal=cdQty*dp[cdQty];
   const kitTotal=cdAddonOn?cdAddonQty*kp:0;
   const priorityTotal=cdPriorityOn?pp:0;
   const total=deviceTotal+kitTotal+priorityTotal;
   const fmt=window._DEVICE_PRICES?window.fmtLocal:(window.fmtPrice||function(n){return'$'+n.toFixed(2);});
-  document.getElementById('cd-total-amt').textContent=fmt(total);
+  document.getElementById('cd-total-amt').textContent=cdAddonOn&&kp===null?'Kit price unavailable':fmt(total);
   const kap=document.getElementById('cd-kit-added-price');
-  if(kap)kap.textContent=fmt(cdAddonQty*kp);
+  if(kap)kap.textContent=kp===null?'Check price':fmt(cdAddonQty*kp);
   saveCartState();
 }
 function togglePriority(){
@@ -2350,14 +2411,25 @@ function togglePriority(){
   updateCartTotals();
 }
 let _coBusy=false;
-function checkoutCart(){
+async function checkoutCart(){
   if(_coBusy)return;
   _coBusy=true;
   const _cbtn=document.querySelector('.cd-cta');
   if(_cbtn){_cbtn.disabled=true;_cbtn.textContent='Loading Secure Checkout…';}
+  let kit;
+  if(cdAddonOn){
+    const displayed=kitQuote;
+    const ready=await refreshKit();
+    if(!ready||!displayed||displayed.id!==kitQuote.id||displayed.amount!==kitQuote.amount||displayed.currency!==kitQuote.currency){
+      _coBusy=false;
+      if(_cbtn){_cbtn.disabled=false;_cbtn.textContent='Review the kit price and try checkout again.';}
+      return;
+    }
+    kit=kitQuote;
+  }
   if(window.fbq){
     var dp={1:59.99,2:44.99,3:39.99};
-    var kp=19.99;
+    var kp=kit?.id===KIT_VARIANTS.b?39.99:19.99;
     var pp=2.99;
     var val=(cdQty*dp[cdQty])+(cdAddonOn?cdAddonQty*kp:0)+(cdPriorityOn?pp:0);
     fbq('track','InitiateCheckout',{content_name:'NovaFlow 2.0',content_type:'product',content_ids:['52709201609015','52709201641783'],currency:'USD',value:val,num_items:cdQty});
@@ -2368,7 +2440,7 @@ function checkoutCart(){
   const parts=[];
   if(blacks>0)parts.push(`${VAR_BLACK}:${blacks}`);
   if(whites>0)parts.push(`${VAR_WHITE}:${whites}`);
-  if(cdAddonOn)parts.push(`${VAR_KIT}:${cdAddonQty}`);
+  if(cdAddonOn)parts.push(`${kit.id}:${cdAddonQty}`);
   if(cdPriorityOn)parts.push(`${VAR_PRIORITY}:1`);
   const VAR_BREATH='52072818606391';  // Breathing Reset guide — every order (verified in Shopify)
   const VAR_MYSTERY='52072818934071'; // Mystery Gift — 2+ (verified in Shopify)
@@ -2378,6 +2450,18 @@ function checkoutCart(){
   if(cdQty>=3)parts.push(`${VAR_CASE}:1`);
   let u=`https://cleriva.com/cart/${parts.join(',')}`;
   if(window.CRO&&typeof window.CRO.decorate==='function'){try{u=window.CRO.decorate(u)||u;}catch(e){}}
+  if(cdAddonOn){
+    const checkoutUrl=new URL(u),arm=window.CRO?.assignments?.thy8o3xu;
+    const tagged=checkoutUrl.searchParams.get('attributes[_cro]')?.split('|')[1]?.split(',')||[];
+    if(kit.id!==assignedKit()||(arm&&!tagged.includes('thy8o3xu:'+arm))){
+      _coBusy=false;
+      if(_cbtn){_cbtn.disabled=false;_cbtn.textContent='Reload to verify your kit price.';}
+      return;
+    }
+    checkoutUrl.searchParams.set('country',kit.country);
+    checkoutUrl.searchParams.set('currency',kit.currency);
+    u=checkoutUrl.href;
+  }
   if(typeof window.gdMtaCheckoutUrl==='function')u=window.gdMtaCheckoutUrl(u);
   window.location.href=u;
 }
@@ -2544,7 +2628,7 @@ if(window.ResizeObserver){
 /* ── Multi-currency ── */
 (async function(){
   const SYM={USD:'$',GBP:'£',EUR:'€',CAD:'CA$',AUD:'A$',NZD:'NZ$',CHF:'CHF ',JPY:'¥',SGD:'S$',HKD:'HK$',MXN:'MX$',INR:'₹',BRL:'R$',ZAR:'R ',DKK:'kr ',SEK:'kr ',NOK:'kr ',AED:'AED ',SAR:'SAR '};
-  let cur='USD',sym='$',rate=1;
+  let cur='USD',sym='$',rate=1,country='US';
   function up99(n){return Math.floor(n)+0.99;}
   window.fmtPrice=function(usd){
     if(cur==='USD')return '$'+usd.toFixed(2);
@@ -2562,16 +2646,17 @@ if(window.ResizeObserver){
     const requestedCurrency=(params.get('currency')||'').toUpperCase();
     const forceUSD=requestedCurrency==='USD'||(!requestedCurrency&&(params.get('country')||'').toUpperCase()==='US');
     if(!forceUSD){
-      const geo=await fetch('https://ipapi.co/json/').then(r=>r.json());
+      const geo=await fetch('https://ipapi.co/json/',{signal:AbortSignal.timeout(3500)}).then(r=>r.json());
       cur=geo.currency||'USD';
+      country=geo.country_code||({USD:'US',CAD:'CA',GBP:'GB',AUD:'AU',NZD:'NZ'})[cur]||'US';
     }
     sym=SYM[cur]||(cur+' ');
     if(cur!=='USD'&&!HARD[cur]){
-      const fx=await fetch('https://open.er-api.com/v6/latest/USD').then(r=>r.json());
+      const fx=await fetch('https://open.er-api.com/v6/latest/USD',{signal:AbortSignal.timeout(3500)}).then(r=>r.json());
       rate=(fx.rates&&fx.rates[cur])||1;
     }
   }catch(e){}
-  if(cur==='USD')return;
+  if(cur==='USD'){startKitMarket(country,cur);return;}
   if(HARD[cur]){
     rate=HARD[cur].single/59.99;
     window._hardSingle={now:HARD[cur].single,was:HARD[cur].compare};
@@ -2591,8 +2676,8 @@ if(window.ResizeObserver){
     3:window.fmtPrice(39.99)+'/ea'
   };
   window._DEVICE_PRICES={1:up99(59.99*rate),2:up99(44.99*rate),3:up99(39.99*rate)};
-  window._KIT_PRICE=up99(19.99*rate);
   window._PRIORITY_PRICE=up99(2.99*rate);
+  startKitMarket(country,cur);
   // Refresh dynamic price displays in new currency
   if(window.updateBuyUI)window.updateBuyUI(currentQty());
 })();
@@ -2623,6 +2708,7 @@ if(window.ResizeObserver){
     '52709201609015': '10886709575991',
     '52709201641783': '10886709575991',
     '52686809956663': '10243429826871',
+    '53595750990135': '11079603061047',
     '50661579325751': '10191614804279'
   };
   function snapshot() {
@@ -2632,7 +2718,7 @@ if(window.ResizeObserver){
       const variant = color === 'white' ? VAR_WHITE : VAR_BLACK;
       items[variant] = (items[variant] || 0) + 1;
     });
-    if (cdAddonOn) items[VAR_KIT] = cdAddonQty;
+    if (cdAddonOn && kitPrice()!==null) items[assignedKit()] = cdAddonQty;
     if (cdPriorityOn) items[VAR_PRIORITY] = 1;
     return items;
   }
