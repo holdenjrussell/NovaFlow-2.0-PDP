@@ -2107,7 +2107,7 @@ const VAR_WHITE='52709201641783';
 const VAR_BLACK='52709201609015';
 /* The CRO edge Worker owns assignment. Shopify owns each variant's market price. */
 const KIT_VARIANTS={a:'52686809956663',b:'53595750990135'};
-let kitMarket=null, kitQuote=null, kitRequest=null;
+let kitMarket=null, marketRequest=null, kitQuote=null, kitRequest=null;
 function assignedKit(){
   const group=window.CRO?.assignments?.thy8o3xu;
   // The edge keeps the visitor's own assignment in _cro and a forced one in _cro_o.
@@ -2141,6 +2141,21 @@ function renderKit(){
   if(amount!==null)document.dispatchEvent(new Event('nf2-kit-quoted'));
 }
 async function readKitQuote(){
+  if(!kitMarket?.country){
+    if(!marketRequest){
+      marketRequest=loadMarket().finally(()=>{
+        marketRequest=null;
+        if(kitMarket?.country&&!kitRequest)refreshKit();
+      });
+    }
+    // Only the kit waits on this deadline. Device and priority pricing use the original response.
+    let timer;
+    try{
+      await Promise.race([marketRequest,new Promise((_,reject)=>{
+        timer=setTimeout(()=>reject(new Error('Kit market unavailable')),6500);
+      })]);
+    }finally{clearTimeout(timer);}
+  }
   const id=assignedKit();
   const requested=kitMarket;
   if(!requested?.country||!id)throw new Error('Kit pricing is still loading');
@@ -2168,10 +2183,6 @@ function refreshKit(){
       .finally(()=>{kitRequest=null;renderKit();});
   }
   return kitRequest;
-}
-function startKitMarket(country,currency){
-  kitMarket={country,currency};
-  refreshKit();
 }
 const VAR_PRIORITY='50661579325751';
 const PRIORITY_PRICE=2.99;
@@ -2287,7 +2298,7 @@ function viewCart(){
   }catch(e){}
 })();
 
-function openCart(qty){
+function openCart(qty,placement){
   resetCheckout();
   cartHas=true;
   setDrawerEmpty(false);
@@ -2298,10 +2309,9 @@ function openCart(qty){
   const pck=document.getElementById('cd-priority-ck');
   if(prow)prow.classList.remove('addon-on');
   if(pck)pck.textContent='+';
-  const heroOn=document.getElementById('h-uvc-addon')&&document.getElementById('h-uvc-addon').classList.contains('addon-on');
-  const offerOn=document.getElementById('uvc-addon')&&document.getElementById('uvc-addon').classList.contains('addon-on');
-  cdAddonOn=heroOn||offerOn;
-  cdAddonQty=cdAddonOn?(heroOn?hUvcQty:uvcQty):1;
+  const lower=placement==='lower';
+  cdAddonOn=document.getElementById(lower?'uvc-addon':'h-uvc-addon').classList.contains('addon-on');
+  cdAddonQty=cdAddonOn?(lower?uvcQty:hUvcQty):1;
   syncCartKitUI();
   renderCartColors();
   updateCartTotals();
@@ -2502,8 +2512,8 @@ async function checkoutCart(){
 window.addEventListener('pageshow',function(e){
   if(e.persisted)resetCheckout();
 });
-function atcHero(){openCart(currentQty());}
-function atcMain(){openCart(currentQty());}
+function atcHero(){openCart(currentQty(),'hero');}
+function atcMain(){openCart(currentQty(),'lower');}
 
 // Initialize default bundle (1)
 hqty(1);
@@ -2656,7 +2666,7 @@ if(window.ResizeObserver){
 })();
 
 /* ── Multi-currency ── */
-(async function(){
+async function loadMarket(){
   const SYM={USD:'$',GBP:'£',EUR:'€',CAD:'CA$',AUD:'A$',NZD:'NZ$',CHF:'CHF ',JPY:'¥',SGD:'S$',HKD:'HK$',MXN:'MX$',INR:'₹',BRL:'R$',ZAR:'R ',DKK:'kr ',SEK:'kr ',NOK:'kr ',AED:'AED ',SAR:'SAR '};
   let cur='USD',sym='$',rate=1,country=null;
   function up99(n){return Math.floor(n)+0.99;}
@@ -2678,17 +2688,18 @@ if(window.ResizeObserver){
     if(/^[A-Z]{2}$/.test(requestedCountry))country=requestedCountry;
     const forceUSD=requestedCurrency==='USD'||(!requestedCurrency&&country==='US');
     if(!forceUSD||!country){
-      const geo=await fetch('https://ipapi.co/json/',{signal:AbortSignal.timeout(3500)}).then(r=>r.json());
+      const geo=await fetch('https://ipapi.co/json/').then(r=>r.json());
       if(!forceUSD)cur=geo.currency||'USD';
       if(!country&&/^[A-Z]{2}$/.test(geo.country_code))country=geo.country_code;
     }
     sym=SYM[cur]||(cur+' ');
     if(cur!=='USD'&&!HARD[cur]){
-      const fx=await fetch('https://open.er-api.com/v6/latest/USD',{signal:AbortSignal.timeout(3500)}).then(r=>r.json());
+      const fx=await fetch('https://open.er-api.com/v6/latest/USD').then(r=>r.json());
       rate=(fx.rates&&fx.rates[cur])||1;
     }
   }catch(e){}
-  if(cur==='USD'){startKitMarket(country,cur);return;}
+  kitMarket={country,currency:cur};
+  if(cur==='USD')return;
   if(HARD[cur]){
     rate=HARD[cur].single/59.99;
     window._hardSingle={now:HARD[cur].single,was:HARD[cur].compare};
@@ -2710,10 +2721,10 @@ if(window.ResizeObserver){
   window._DEVICE_PRICES={1:up99(59.99*rate),2:up99(44.99*rate),3:up99(39.99*rate)};
   window._PRIORITY_PRICE=up99(2.99*rate);
   if(cartHas)renderCartColors();
-  startKitMarket(country,cur);
   // Refresh dynamic price displays in new currency
   if(window.updateBuyUI)window.updateBuyUI(currentQty());
-})();
+}
+refreshKit();
 </script>
 <script>
 (function(){
